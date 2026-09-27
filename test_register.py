@@ -21,32 +21,24 @@ def register(peer_name: str, IPv4_addr:str, m_port:int, p_port:int) -> str:
     }
     return "SUCCESS"
 
-# Valid registration.
 assert register("Jaren", "127.0.0.1", 11501, 11502) == "SUCCESS"
 
-# Duplicate name.
 assert register("Jaren", "127.0.0.1", 11503, 11504) == "FAILURE"
 
-# Invalid names.
 assert register("Peer1", "127.0.0.1", 11503, 11504) == "FAILURE"
 assert register("A" * 16, "127.0.0.1", 11503, 11504) == "FAILURE"
 assert register("", "127.0.0.1", 11503, 11504) == "FAILURE"
 
-# Same port used for both purposes.
 assert register("Alex", "127.0.0.1", 11503, 11503) == "FAILURE"
 
-# New m-port conflicts with an existing m-port or p-port.
 assert register("Alex", "127.0.0.1", 11501, 11504) == "FAILURE"
 assert register("Alex", "127.0.0.1", 11502, 11504) == "FAILURE"
 
-# New p-port conflicts with an existing m-port or p-port.
 assert register("Alex", "127.0.0.1", 11503, 11501) == "FAILURE"
 assert register("Alex", "127.0.0.1", 11503, 11502) == "FAILURE"
 
-# A name exactly 15 characters long is allowed.
 assert register("A" * 15, "127.0.0.1", 11503, 11504) == "SUCCESS"
 
-# Only the two successful registrations should be stored.
 assert len(registered_peers) == 2
 assert registered_peers["Jaren"] == {
     "ipv4_addr": "127.0.0.1",

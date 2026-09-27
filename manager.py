@@ -5,6 +5,8 @@ import json
 
 #dictionary to store valid peers
 registered_peers = {}
+#Flag for currently building dht
+building_dht = False
 
 #register function 
 def register(peer_name: str, IPv4_addr:str, m_port:int, p_port:int) -> str:
@@ -29,7 +31,9 @@ def register(peer_name: str, IPv4_addr:str, m_port:int, p_port:int) -> str:
     return "SUCCESS"
 
 def setup_dht(peer_name:str, n:int, year:int) -> tuple[str, list[tuple[str, str, int]]]:
-    
+
+    global building_dht
+
     if peer_name not in registered_peers or n < 3 :
         return "FAILURE", []
 
@@ -44,7 +48,7 @@ def setup_dht(peer_name:str, n:int, year:int) -> tuple[str, list[tuple[str, str,
 
     if len(free_peers) < n-1:
         return "FAILURE", []
-
+    building_dht = True
     selected = random.sample(free_peers, n-1)
 
     leader = registered_peers[peer_name]
@@ -60,7 +64,20 @@ def setup_dht(peer_name:str, n:int, year:int) -> tuple[str, list[tuple[str, str,
     
 
 def dht_complete(peer_name):
-    pass
+
+    global building_dht
+
+    if peer_name not in registered_peers:
+        return "FAILURE"
+
+    if not building_dht:
+        return "FAILURE"
+    
+    peer = registered_peers[peer_name]
+    if peer["state"] == "Leader":
+        building_dht = False
+        return "SUCCESS"
+    return "FAILURE"   
 
 #check to ensure program args include a port number
 if (len(sys.argv) != 2):
@@ -82,7 +99,32 @@ print(f"Manager is waiting on port {manager_port} for messages...")
 while True:
     data, sender_address = manager_socket.recvfrom(4096)
     message = json.loads(data.decode("utf-8"))
+    
+    print(f"Received from {sender_address}: {message}")
 
+    command = message["command"]
 
-    print(f"Recieved from {sender_address}: {message}")
+    if building_dht and command != "dht-complete":
+        response = {"status": "FAILURE"}
+    
+    elif command == "register":
+        result = register(
+            message["peer_name"],
+            message["ipv4_addr"],
+            message["m_port"],
+            message["p_port"]
+        )
+        response = {"status": result}
+
+    elif command == "setup-dht":
+        result, peers = setup_dht(message["peer_name"], message["n"], message["year"])
+        response = {"status": result, "peers": peers}
+
+    elif command == "dht-complete":
+        result = dht_complete(message["peer_name"])
+        response = {"status": result}
+    else:
+        response = {"status": "FAILURE"}
+
+    manager_socket.sendto(json.dumps(response).encode("utf-8"), sender_address)
 
