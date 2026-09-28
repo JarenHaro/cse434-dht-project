@@ -2,6 +2,8 @@ import socket
 import sys
 import json
 import threading
+import csv 
+from pathlib import Path
 
 
 if len(sys.argv) != 3:
@@ -19,6 +21,52 @@ ring_state = {
     "right_neighbor": None
 }
 
+local_hash_table = {}
+
+def load_storm_records(year: int) -> list:
+    filename = Path(__file__).resolve().parent / f"details-{year}.csv"
+
+    with filename.open("r", newline="", encoding="utf-8-sig") as file:
+        reader = csv.reader(file)
+        next(reader, None)
+
+        records = []
+
+        for row in reader:
+            if not row:
+                continue
+
+            if len(row) != 14:
+                raise ValueError(
+                    f"Expected 14 columns, got {len(row)} "
+                    f"near line {reader.line_num}."
+                )
+
+            event_id = int(row[0])
+            records.append([event_id, *row[1:]])
+
+    return records
+
+
+def first_prime_above(number: int) -> int:
+    candidate = max(2, number + 1)
+
+    while True:
+        is_prime = True
+        divisor = 2
+
+        while divisor * divisor <= candidate:
+            if candidate % divisor == 0:
+                is_prime = False
+                break
+
+            divisor += 1
+
+        if is_prime:
+            return candidate
+
+        candidate += 1
+
 def ring_setup(peer_id, peers):
     ring_size = len(peers)
     right_id = (peer_id + 1) % ring_size
@@ -30,6 +78,13 @@ def ring_setup(peer_id, peers):
     neighbor = peers[right_id]
 
     print(f"\nRing configured: ID= {peer_id}, size={ring_size}," f"right neighbor={neighbor[0]} at  {neighbor[1]}:{neighbor[2]}")
+
+def store_record(pos, record):
+    if pos not in local_hash_table:
+        local_hash_table[pos] = []
+
+    local_hash_table[pos].append(record)
+    print(f"Stored event {record[0]} at position {pos}")
 
 def receive_peer_messages(peer_socket: socket.socket):
     while True:
@@ -221,6 +276,31 @@ with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as manager_socket, \
                     print("Ring check timed out. Try restarting and testing again.")
                     continue
                 print("All peers are ready. Safe to start distributing records.")
+
+                try:
+                    records = load_storm_records(dht_year)
+                except (OSError, ValueError) as error:
+                    print(f"Could not load dataset: {error}")
+                    print("Fix the file issue and restart the test.")
+                    continue
+
+                record_count = len(records)
+                table_size = first_prime_above(2 * record_count)
+
+                print(f"Loaded {record_count} storm records.")
+                print(f"Hash table size: {table_size}")
+
+                expected_counts = [0] * ring_state["size"]
+
+                for record in records:
+                    event_id = record[0]
+                    pos = event_id % table_size
+                    destination_id = pos % ring_state["size"]
+
+                    expected_counts[destination_id] += 1
+
+                for peer_id, count in enumerate(expected_counts):
+                    print(f"Peer ID {peer_id} should receive {count} records.")
 
             print("Manager response:", response["status"])
         except socket.timeout:
