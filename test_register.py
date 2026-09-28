@@ -1,3 +1,5 @@
+#testing file for the beginning of the project.
+
 registered_peers = {}
 
 def register(peer_name: str, IPv4_addr:str, m_port:int, p_port:int) -> str:

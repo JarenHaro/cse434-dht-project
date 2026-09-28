@@ -26,6 +26,7 @@ ring_state = {
 
 local_hash_table = {}
 
+#loads the storm records 
 def load_storm_records(year: int) -> list:
     filename = Path(__file__).resolve().parent / f"details-{year}.csv"
 
@@ -50,7 +51,7 @@ def load_storm_records(year: int) -> list:
 
     return records
 
-
+#helper function for hashing
 def first_prime_above(number: int) -> int:
     candidate = max(2, number + 1)
 
@@ -82,6 +83,7 @@ def ring_setup(peer_id, peers):
 
     print(f"\nRing configured: ID= {peer_id}, size={ring_size}," f"right neighbor={neighbor[0]} at  {neighbor[1]}:{neighbor[2]}")
 
+#implements the storage of records onto respective hash tables
 def store_record(pos, record):
     if pos not in local_hash_table:
         local_hash_table[pos] = []

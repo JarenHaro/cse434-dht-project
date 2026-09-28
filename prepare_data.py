@@ -7,7 +7,6 @@ folder = Path(__file__).resolve().parent
 source = folder / "StormEvents_details-ftp_v1.0_d1950_c20260323.csv.gz"
 destination = folder / "details-1950.csv"
 
-# The assignment's 14 fields, in the required order.
 fields = [
     "EVENT_ID",
     "STATE",
