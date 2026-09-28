@@ -63,7 +63,7 @@ def setup_dht(peer_name:str, n:int, year:int) -> tuple[str, list[tuple[str, str,
     return "SUCCESS", dht_peers
     
 
-def dht_complete(peer_name):
+def dht_complete(peer_name:str) -> str:
 
     global building_dht
 
