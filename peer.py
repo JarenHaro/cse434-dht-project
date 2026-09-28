@@ -14,6 +14,9 @@ manager_address = (sys.argv[1], int(sys.argv[2]))
 
 ring_is_ready = threading.Event()
 
+counts_received = threading.Event()
+actual_counts = []
+
 ring_state = {
     "id": None,
     "size": None,
@@ -86,6 +89,22 @@ def store_record(pos, record):
     local_hash_table[pos].append(record)
     print(f"Stored event {record[0]} at position {pos}")
 
+
+def send_to_right(peer_socket, message):
+    name, ip_address, port = ring_state["right_neighbor"]
+
+    peer_socket.sendto(
+        json.dumps(message).encode("utf-8"),
+        (ip_address, port)
+    )
+
+    print(f"Sent {message['command']} to right neighbor {name}")
+
+    
+
+def count_local_records():
+    return sum(len(bucket) for bucket in local_hash_table.values())
+
 def receive_peer_messages(peer_socket: socket.socket):
     while True:
         try:
@@ -96,25 +115,47 @@ def receive_peer_messages(peer_socket: socket.socket):
         try:
             message = json.loads(data.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
-            print(f"\n Invalid peer message from {sender_address}")
+            print(f"\nInvalid peer message from {sender_address}")
             continue
-        if message.get("command") == "set-id":
+
+        command = message.get("command")
+        print(f"\nReceived {command} from {sender_address}")
+
+        if command == "set-id":
             ring_setup(message["id"], message["peers"])
-        elif message.get("command") == "ring-is-ready":
+
+        elif command == "ring-is-ready":
             if ring_state["id"] is None:
                 continue
 
             if ring_state["id"] == 0:
-                print("\nReadiness message returned. All peers are configured.")
+                print("Readiness message returned. All peers are configured.")
                 ring_is_ready.set()
             else:
-                neighbor = ring_state["right_neighbor"]
+                send_to_right(peer_socket, message)
 
-                peer_socket.sendto(json.dumps(message).encode("utf-8"), (neighbor[1], neighbor[2]))
+        elif command == "store":
+            pos = message["pos"]
+            record = message["record"]
+            destination_id = pos % ring_state["size"]
 
-                print(f"\nForwarded ring-is-ready to {neighbor[0]}")
+            if destination_id == ring_state["id"]:
+                store_record(pos, record)
+            elif ring_state["id"] == 0:
+                print(f"ERROR: Event {record[0]} returned without being stored.")
+            else:
+                send_to_right(peer_socket, message)
+        elif command == "collect-counts":
+            if ring_state["id"] == 0:
+                actual_counts.clear()
+                actual_counts.extend(message["counts"])
+                counts_received.set()
+            else:
+                count = count_local_records()
+                message["counts"].append(count)
 
-        print(f"\nPeer message from {sender_address}: {message}")
+                print(f"Peer ID {ring_state['id']} has {count} records.")
+                send_to_right(peer_socket, message)
 
 with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as manager_socket, \
      socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as peer_socket:
@@ -302,6 +343,80 @@ with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as manager_socket, \
                 for peer_id, count in enumerate(expected_counts):
                     print(f"Peer ID {peer_id} should receive {count} records.")
 
+                for record in records:
+                    event_id = record[0]
+                    pos = event_id % table_size
+                    destination_id = pos % ring_state["size"]
+
+                    if destination_id == ring_state["id"]:
+                        store_record(pos, record)
+                    else:
+                        neighbor = ring_state["right_neighbor"]
+
+                        store_message = {
+                            "command": "store",
+                            "pos": pos,
+                            "record": record
+                        }
+
+                        peer_socket.sendto(
+                            json.dumps(store_message).encode("utf-8"),
+                            (neighbor[1], neighbor[2])
+                        )
+
+                        print(f"Sent event {event_id} to right neighbor {neighbor[0]}")
+
+                print("Finished sending records; storage counts still need verification.")
+                counts_received.clear()
+                actual_counts.clear()
+
+                count_message = {
+                    "command": "collect-counts",
+                    "counts": [count_local_records()]
+                }
+
+                send_to_right(peer_socket, count_message)
+
+                if not counts_received.wait(timeout=10):
+                    print("Count collection timed out. DHT not marked complete.")
+                    continue
+
+                for peer_id, count in enumerate(actual_counts):
+                    name = dht_peers[peer_id][0]
+                    print(f"Peer {name}, ID {peer_id}: {count} records stored.")
+
+                print(f"Total records stored: {sum(actual_counts)}")
+
+                if actual_counts != expected_counts:
+                    print(f"Expected counts: {expected_counts}")
+                    print(f"Actual counts:   {actual_counts}")
+                    print("Counts do not match. DHT not marked complete.")
+                    continue
+
+                completion_message = {
+                    "command": "dht-complete",
+                    "peer_name": registered_name
+                }
+
+                manager_socket.sendto(
+                    json.dumps(completion_message).encode("utf-8"),
+                    manager_address
+                )
+
+                print("Sent dht-complete to manager.")
+
+                try:
+                    data, sender_address = manager_socket.recvfrom(4096)
+                except socket.timeout:
+                    print("No completion response from manager within 10 seconds.")
+                    continue
+
+                completion_response = json.loads(data.decode("utf-8"))
+
+                if completion_response["status"] == "SUCCESS":
+                    print("DHT setup completed successfully.")
+                else:
+                    print("Manager rejected dht-complete.")
             print("Manager response:", response["status"])
         except socket.timeout:
             print("No response from the manager within 5 seconds.")
